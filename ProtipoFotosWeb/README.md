@@ -47,13 +47,20 @@ Abre <http://localhost:3000> y acepta el permiso de cámara.
 
 > `PORT=8080 python server.py` (o `PORT=8080 node server.js`) para cambiar el puerto.
 
-### Verificación en GitHub Actions
+### Publicar en GitHub Pages
 
-El workflow `.github/workflows/prototipo-fotos-web.yml` arranca `server.py` en un
-runner temporal al subir cambios, abrir o actualizar una pull request, o iniciarlo
-manualmente desde la pestaña **Actions**. Comprueba la página, `app.js` y
-`/api/health`, y detiene el servidor al terminar. El servidor solo está disponible
-mientras se ejecuta ese job; este workflow no lo publica como sitio permanente.
+El workflow `.github/workflows/prototipo-fotos-web.yml` verifica el servidor en
+cambios y pull requests. Al actualizar `main` o iniciarlo manualmente desde
+**Actions**, publica `index.html`, `styles.css` y `app.js` en GitHub Pages. En la
+configuración del repositorio, habilita **Settings → Pages → Build and deployment →
+Source: GitHub Actions**. La URL publicada aparece en el entorno `github-pages` del
+workflow.
+
+GitHub Pages sirve archivos estáticos, no ejecuta `server.py` ni `server.js`. Para
+procesar capturas en la web publicada, despliega el backend en un servicio externo
+con HTTPS y configura su endpoint en **Servidor de postprocesado** o con el parámetro
+`?endpoint=https://tu-servidor/api/process`. La cámara funciona en Pages porque la
+página se sirve por HTTPS.
 
 ### Probar desde el móvil
 

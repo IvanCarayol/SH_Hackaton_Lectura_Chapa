@@ -2,6 +2,8 @@ name: Prototipo Fotos Web
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "ProtipoFotosWeb/**"
       - ".github/workflows/prototipo-fotos-web.yml"
@@ -13,6 +15,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
 
 jobs:
   verify-server:
@@ -59,3 +65,36 @@ jobs:
           python -c 'import json, pathlib; data = json.loads(pathlib.Path("'"$RUNNER_TEMP"'/health.json").read_text()); assert data.get("ok") is True, data'
           curl --fail --silent http://127.0.0.1:3000/ | grep --quiet '<title>Captura y postprocesado</title>'
           curl --fail --silent http://127.0.0.1:3000/app.js | grep --quiet 'window.captura'
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: verify-server
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare static website
+        run: |
+          mkdir -p "$RUNNER_TEMP/prototipo-site"
+          cp ProtipoFotosWeb/index.html ProtipoFotosWeb/styles.css ProtipoFotosWeb/app.js "$RUNNER_TEMP/prototipo-site/"
+
+      - name: Upload website artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/prototipo-site
+
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4
