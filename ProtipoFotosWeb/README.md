@@ -47,6 +47,14 @@ Abre <http://localhost:3000> y acepta el permiso de cámara.
 
 > `PORT=8080 python server.py` (o `PORT=8080 node server.js`) para cambiar el puerto.
 
+### Verificación en GitHub Actions
+
+El workflow `.github/workflows/prototipo-fotos-web.yml` arranca `server.py` en un
+runner temporal al subir cambios, abrir o actualizar una pull request, o iniciarlo
+manualmente desde la pestaña **Actions**. Comprueba la página, `app.js` y
+`/api/health`, y detiene el servidor al terminar. El servidor solo está disponible
+mientras se ejecuta ese job; este workflow no lo publica como sitio permanente.
+
 ### Probar desde el móvil
 
 `getUserMedia` solo funciona en **contexto seguro**: `https://` o `localhost`.

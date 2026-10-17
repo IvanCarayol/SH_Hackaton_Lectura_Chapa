@@ -1,0 +1,61 @@
+name: Prototipo Fotos Web
+
+on:
+  push:
+    paths:
+      - "ProtipoFotosWeb/**"
+      - ".github/workflows/prototipo-fotos-web.yml"
+  pull_request:
+    paths:
+      - "ProtipoFotosWeb/**"
+      - ".github/workflows/prototipo-fotos-web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-server:
+    name: Start and verify prototype server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Start server and check frontend and health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ProtipoFotosWeb
+
+          python server.py > "$RUNNER_TEMP/prototipo-fotos-web.log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health > "$RUNNER_TEMP/health.json"; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            cat "$RUNNER_TEMP/prototipo-fotos-web.log"
+            echo "Server did not become ready."
+            exit 1
+          fi
+
+          python -c 'import json, pathlib; data = json.loads(pathlib.Path("'"$RUNNER_TEMP"'/health.json").read_text()); assert data.get("ok") is True, data'
+          curl --fail --silent http://127.0.0.1:3000/ | grep --quiet '<title>Captura y postprocesado</title>'
+          curl --fail --silent http://127.0.0.1:3000/app.js | grep --quiet 'window.captura'
