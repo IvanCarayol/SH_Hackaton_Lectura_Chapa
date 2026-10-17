@@ -82,7 +82,7 @@
      *   0.80        0.48       0.72      NO_PLATE
      *   0.70        0.36       0.59      NO_PLATE
      *
-     * Con `minCoverageRatio` 0.55 y `minColumnRatio` 0.78 se acepta la chapa
+     * Con `minCoverageRatio` 0.57 y `minColumnRatio` 0.78 se acepta la chapa
      * si llena al menos el ~86 % del encuadre de referencia, y se rechaza por
      * debajo. Desplazada un 15 % (sigue siendo la misma chapa a tamaño
      * completo) da cobertura 0.64-0.66 y pasa; desplazada un 25 % en vertical
@@ -139,10 +139,10 @@
        * acepta si llena ~86 % del encuadre de referencia (0.74 de cobertura)
        * y se rechaza por debajo.
        */
-      minCoverageRatio: 0.55,
+      minCoverageRatio: 0.7,
 
       /** Cobertura mínima exigida en cada columna del marco (0–1). */
-      minColumnCoverage: 0.45,
+      minColumnCoverage: 0.55,
 
       /**
        * Fracción mínima de columnas que deben superar la anterior (0–1).
@@ -156,7 +156,7 @@
        * Nitidez mínima: media del laplaciano (curvatura) ÷ media de las
        * diferencias horizontales. Al normalizar, el índice no depende del
        * contraste ni de la escena. Medido en el navegador con las fotos
-       * reales: chapa enfocada 1.8-2.9 · desenfoque leve <1.3.
+       * reales: chapa enfocada 1.8-2.9 · desenfoque leve <1.7.
        */
       sharpnessThreshold: 1.35,
 
