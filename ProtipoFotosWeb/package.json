@@ -1,0 +1,12 @@
+{
+  "name": "captura-postprocesado",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frontend simple de captura fotográfica con marco tipo QR y mock del servidor de postprocesado.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

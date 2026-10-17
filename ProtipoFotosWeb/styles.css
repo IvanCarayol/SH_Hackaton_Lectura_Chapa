@@ -1,0 +1,764 @@
+/* =========================================================================
+   Captura + postprocesado — hoja de estilos
+   Estética de lector de QR: fondo oscuro, marco con esquinas y línea de barrido.
+   ========================================================================= */
+
+/* ----------------------------- Tokens ---------------------------------- */
+:root {
+  --bg: #08090c;
+  --bg-soft: #101218;
+  --panel: #12141b;
+  --panel-2: #191d26;
+  --line: rgba(255, 255, 255, 0.09);
+  --text: #f2f4f8;
+  --muted: #939cb0;
+  --accent: #35e0a1;
+  --accent-dim: rgba(53, 224, 161, 0.18);
+  --info: #4fc3f7;
+  --danger: #ff5f6d;
+  /* Colores de estado del análisis del encuadre */
+  --state-ok: #00c851;
+  --state-warn: #ffbb33;
+  --state-bad: #ff4444;
+  --radius-lg: 22px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  --pad: 16px;
+  /* Marco guía: banda panorámica. Ancho en % del visor (container queries)
+     y relación de aspecto 4/1 (≈ una cuarta parte de alto que de ancho). */
+  --frame-width: 78cqw;
+  --frame-max: 760px;
+  --frame-aspect: 4 / 1;
+}
+
+/* ------------------------------ Base ----------------------------------- */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background:
+    radial-gradient(120% 80% at 50% 0%, #171b26 0%, var(--bg) 55%) no-repeat,
+    var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  display: flex;
+  justify-content: center;
+  padding: max(var(--pad), env(safe-area-inset-top)) var(--pad)
+           max(var(--pad), env(safe-area-inset-bottom));
+}
+
+[hidden] { display: none !important; }
+
+h1, h2, p, figure, dl, dd { margin: 0; }
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------ Layout --------------------------------- */
+.app {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.app__header { display: flex; flex-direction: column; gap: 6px; }
+
+.app__brand { display: flex; align-items: center; gap: 9px; }
+
+.app__dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-dim);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 4px var(--accent-dim); }
+  50%      { box-shadow: 0 0 0 8px rgba(53, 224, 161, 0.06); }
+}
+
+.app__title {
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.app__subtitle {
+  color: var(--muted);
+  font-size: 0.875rem;
+  max-width: 44ch;
+}
+
+/* ----------------------------- Visor ----------------------------------- */
+.scanner { display: flex; flex-direction: column; gap: 14px; }
+
+.scanner__viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: min(62dvh, 460px);
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: var(--shadow);
+  container-type: size;
+}
+
+.scanner__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+/* Marco guía centrado + máscara oscura a su alrededor */
+.scanner__overlay,
+.scanner__flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.scanner__frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(var(--frame-width), var(--frame-max));
+  aspect-ratio: var(--frame-aspect);
+  max-height: 82cqh;
+  /* --frame-color / --frame-glow / --frame-border los reescribe cada estado
+     del análisis (ver más abajo), así que marco, esquinas y barrido van a una. */
+  --frame-color: var(--accent);
+  --frame-glow: rgba(53, 224, 161, 0.45);
+  --frame-border: rgba(255, 255, 255, 0.16);
+  border: 2px solid var(--frame-border);
+  border-radius: 14px;
+  box-shadow: 0 0 0 100vmax rgba(4, 5, 9, 0.66);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+/* ------------------ Estados del análisis del encuadre ------------------- */
+/* Sin chapa o mal posicionada: rojo y línea discontinua */
+.scanner__frame[data-status="NO_PLATE"] {
+  --frame-color: var(--state-bad);
+  --frame-glow: rgba(255, 68, 68, 0.45);
+  --frame-border: var(--state-bad);
+  border-style: dashed;
+}
+
+/* Chapa detectada pero sin nitidez (movimiento o desenfoque): ámbar */
+.scanner__frame[data-status="BLURRY"] {
+  --frame-color: var(--state-warn);
+  --frame-glow: rgba(255, 187, 51, 0.45);
+  --frame-border: var(--state-warn);
+}
+
+/* Todo correcto: verde con un pulso brillante */
+.scanner__frame[data-status="READY_TO_CAPTURE"] {
+  --frame-color: var(--state-ok);
+  --frame-glow: rgba(0, 200, 81, 0.5);
+  --frame-border: var(--state-ok);
+  animation: framePulse 1.5s ease-out infinite;
+}
+
+@keyframes framePulse {
+  0% {
+    box-shadow: 0 0 0 100vmax rgba(4, 5, 9, 0.66), 0 0 0 0 rgba(0, 200, 81, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 100vmax rgba(4, 5, 9, 0.66), 0 0 0 16px rgba(0, 200, 81, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 100vmax rgba(4, 5, 9, 0.66), 0 0 0 0 rgba(0, 200, 81, 0);
+  }
+}
+
+/* Esquinas tipo corchete */
+.corner {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 0 solid var(--frame-color, var(--accent));
+  filter: drop-shadow(0 0 6px var(--frame-glow, rgba(53, 224, 161, 0.45)));
+}
+
+.corner--tl { top: 0;    left: 0;    border-top-width: 3px;    border-left-width: 3px;  border-top-left-radius: 14px; }
+.corner--tr { top: 0;    right: 0;   border-top-width: 3px;    border-right-width: 3px; border-top-right-radius: 14px; }
+.corner--bl { bottom: 0; left: 0;    border-bottom-width: 3px; border-left-width: 3px;  border-bottom-left-radius: 14px; }
+.corner--br { bottom: 0; right: 0;   border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 14px; }
+
+/* Línea de barrido */
+.scanner__laser {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 6%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--frame-color, var(--accent)) 22%, #ffffff 50%, var(--frame-color, var(--accent)) 78%, transparent);
+  box-shadow: 0 0 14px 3px var(--frame-glow, rgba(53, 224, 161, 0.5));
+  animation: sweep 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes sweep {
+  0%   { top: 6%;  opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 92%; opacity: 0; }
+}
+
+/* --------------- Aviso flotante del análisis (feedback) ----------------- */
+.analysis {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 8px;
+  max-width: min(90cqw, 460px);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(8, 9, 12, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(4px);
+  font-size: 0.78rem;
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: border-color 0.2s ease;
+}
+
+.analysis__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--analysis-color, var(--muted));
+  box-shadow: 0 0 8px var(--analysis-color, transparent);
+}
+
+.analysis__metrics {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.analysis[data-status="NO_PLATE"] {
+  --analysis-color: var(--state-bad);
+  border-color: rgba(255, 68, 68, 0.55);
+}
+
+.analysis[data-status="BLURRY"] {
+  --analysis-color: var(--state-warn);
+  border-color: rgba(255, 187, 51, 0.55);
+}
+
+.analysis[data-status="READY_TO_CAPTURE"] {
+  --analysis-color: var(--state-ok);
+  border-color: rgba(0, 200, 81, 0.6);
+}
+
+/* Flash de captura */
+.scanner__flash {
+  background: #fff;
+  opacity: 0;
+  transition: opacity 0.28s ease-out;
+}
+
+.scanner__viewport.is-flash .scanner__flash {
+  opacity: 0.9;
+  transition: none;
+}
+
+/* La animación se pausa mientras se procesa */
+.app:not([data-state="ready"]) .scanner__laser,
+.app:not([data-state="ready"]) .app__dot { animation-play-state: paused; }
+
+/* --------------------- Avisos / procesando ------------------------------ */
+.scanner__notice,
+.scanner__processing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  backdrop-filter: blur(3px);
+}
+
+.scanner__notice { background: rgba(8, 9, 12, 0.9); }
+
+.scanner__noticeText {
+  font-size: 0.9rem;
+  color: var(--text);
+  max-width: 28ch;
+}
+
+.scanner__processing {
+  background: rgba(8, 9, 12, 0.72);
+  gap: 10px;
+}
+
+.scanner__processingText { font-size: 0.95rem; font-weight: 600; }
+
+.scanner__processingHint { font-size: 0.8rem; color: var(--muted); }
+
+/* ------------------------------ Spinner -------------------------------- */
+.spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.14);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+.spinner--lg { width: 40px; height: 40px; border-width: 4px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------ Estado --------------------------------- */
+/* --------------------- HUD (estado + disparador) ----------------------- */
+.hud {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scanner__status {
+  min-height: 1.2em;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+/* ----------------------------- Controles ------------------------------- */
+/* Rejilla de 3 pistas: el disparador queda centrado aunque los grupos
+   laterales estén vacíos (cámara única, sin linterna, autocaptura oculta). */
+.controls {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.controls__group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.controls__group--start { justify-content: flex-start; }
+
+.controls__group--end { justify-content: flex-end; }
+
+.btn {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: background-color 0.16s ease, border-color 0.16s ease,
+              transform 0.12s ease, color 0.16s ease, opacity 0.16s ease;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.btn--icon {
+  width: 56px;
+  height: 56px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.btn--icon:active { transform: scale(0.94); }
+.btn--icon.is-on { color: #0a0d12; background: var(--accent); border-color: var(--accent); }
+
+/* Disparador, al estilo de una app de cámara.
+   Se mantiene centrado por la rejilla de .controls, tenga o no botones
+   a los lados. */
+.btn--shutter {
+  position: relative;
+  width: 74px;
+  height: 74px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.06), 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+
+.btn--shutter::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff, #dfe4ec);
+  transition: transform 0.12s ease, background-color 0.16s ease;
+}
+
+.btn--shutter:not(:disabled):active::after { transform: scale(0.86); }
+
+.btn--shutter:disabled {
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: none;
+}
+
+.btn--shutter:disabled::after { background: rgba(255, 255, 255, 0.24); }
+
+/* Con `allowOverride`, el disparador sigue pulsable aunque el análisis no
+   esté conforme: se avisa con un anillo ámbar. */
+.btn--shutter.is-gated {
+  border-color: var(--state-warn);
+  box-shadow: 0 0 0 6px rgba(255, 187, 51, 0.16), 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+
+.btn--shutter.is-gated::after { background: linear-gradient(180deg, #fff6e2, #ffd98a); }
+
+.btn--primary {
+  padding: 12px 18px;
+  font-weight: 600;
+  background: var(--accent);
+  color: #06231a;
+  border: 1px solid var(--accent);
+}
+
+.btn--primary:hover { background: #4cebb0; }
+
+.btn--ghost {
+  padding: 12px 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.btn--ghost:hover { border-color: rgba(255, 255, 255, 0.22); }
+
+.btn--ghost:active { transform: scale(0.98); }
+
+/* ----------------------------- Resultado ------------------------------- */
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  animation: rise 0.28s ease-out;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.result__title {
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.result__figure {
+  margin: 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--line);
+}
+
+.result__figure img {
+  display: block;
+  width: 100%;
+  max-height: 52dvh;
+  object-fit: contain;
+  background: #000;
+}
+
+.result__meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  font-size: 0.8rem;
+}
+
+.result__meta dt { color: var(--muted); }
+
+.result__meta dd {
+  color: var(--text);
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+.result__actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+/* ------------------------------ Ajustes -------------------------------- */
+.settings {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  padding: 12px 14px;
+  font-size: 0.85rem;
+}
+
+.settings summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 550;
+  list-style: none;
+}
+
+.settings summary::-webkit-details-marker { display: none; }
+
+.settings summary::before {
+  content: "⚙";
+  margin-right: 8px;
+  color: var(--accent);
+}
+
+.settings[open] summary { color: var(--text); margin-bottom: 10px; }
+
+.settings__label {
+  display: block;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.settings__row { display: flex; gap: 8px; }
+
+.settings__row input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.settings__row input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings__hint {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+/* ------------------------------- Toast --------------------------------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  transform: translate(-50%, 14px);
+  max-width: min(92vw, 460px);
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: #22252e;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--info);
+  color: var(--text);
+  font-size: 0.85rem;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 20;
+}
+
+.toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
+.toast.is-error { border-left-color: var(--danger); }
+.toast.is-ok { border-left-color: var(--accent); }
+
+/* --------------------------- Responsive -------------------------------- */
+@media (min-width: 560px) {
+  .app__title { font-size: 1.3rem; }
+}
+
+/* --------------- Modo horizontal (móvil apaisado) -----------------------
+   El visor se queda con todo el alto de la pantalla y el estado + los mandos
+   flotan encima de la imagen, como en una app de cámara. El resultado se
+   muestra en un panel lateral para no tapar el encuadre.
+   ------------------------------------------------------------------------ */
+@media (orientation: landscape) and (pointer: coarse) {
+  body {
+    padding: max(6px, env(safe-area-inset-top)) 10px max(6px, env(safe-area-inset-bottom));
+    align-items: stretch;
+  }
+
+  .app {
+    max-width: none;
+    height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+
+  /* En horizontal el espacio es para la cámara, no para la cabecera */
+  .app__header { display: none; }
+
+  .scanner {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 0;
+  }
+
+  .scanner__viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+    aspect-ratio: auto;
+    max-height: none;
+    border-radius: 18px;
+  }
+
+  .hud {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    gap: 4px;
+    padding: 34px 18px 12px;
+    border-radius: 0 0 18px 18px;
+    background: linear-gradient(to top, rgba(4, 5, 9, 0.74), rgba(4, 5, 9, 0));
+  }
+
+  .controls { gap: 12px; }
+
+  .controls__group { gap: 8px; }
+
+  .btn--icon { width: 52px; height: 52px; }
+
+  .btn--shutter { width: 58px; height: 58px; }
+
+  .scanner__status { font-size: 0.74rem; }
+
+  .settings { flex: 0 0 auto; padding: 8px 14px; }
+
+  .result {
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: min(46vw, 400px);
+    overflow-y: auto;
+    z-index: 12;
+  }
+
+  .result__figure img { max-height: 38dvh; }
+
+  /* Arriba, para no pisar los mandos que flotan sobre la imagen */
+  .toast {
+    top: max(10px, env(safe-area-inset-top));
+    bottom: auto;
+  }
+}
+
+/* ------------- Aviso: hay que girar el dispositivo a horizontal ---------- */
+.rotate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 28px;
+  text-align: center;
+  background: radial-gradient(95% 70% at 50% 12%, #171b26 0%, var(--bg) 70%);
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .rotate { display: flex; }
+}
+
+.rotate__icon {
+  width: 62px;
+  height: 62px;
+  color: var(--accent);
+  animation: tilt 2.8s ease-in-out infinite;
+}
+
+@keyframes tilt {
+  0%, 24%  { transform: rotate(0deg); }
+  46%, 78% { transform: rotate(-90deg); }
+  100%     { transform: rotate(0deg); }
+}
+
+.rotate__title { font-size: 1.05rem; font-weight: 650; }
+
+.rotate__text {
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
