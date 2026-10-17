@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+
+# Resultados de las lecturas: fotos que sube la app (una carpeta por captura)
+ProtipoFotosWeb/uploads/*
+
+# Sistema
+.DS_Store
+Thumbs.db

@@ -4,7 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#08090c" />
-  <meta name="description" content="Captura una fotografía y envíala al servidor para su postprocesado." />
+  <meta name="description" content="Captura una fotografía de la chapa y envíala al servidor para leer el texto troquelado (Tesseract OCR o plantillas CAD)." />
+
+  <!-- Metadatos del repositorio (la app los usa para enlazar y para saber si
+       está publicada en GitHub Pages, donde no hay backend). -->
+  <meta name="github-repo" content="IvanCarayol/SH_Hackaton_Lectura_Chapa" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Lectura de chapa — captura y postprocesado" />
+  <meta property="og:description" content="Visor de cámara que envía la foto al servidor y muestra el workflow de OCR paso a paso." />
+
+  <!-- Favicon embebido (evita el 404 de /favicon.ico en GitHub Pages) -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2308090c'/%3E%3Cg fill='%2335e0a1'%3E%3Crect x='6' y='9' width='3' height='14'/%3E%3Crect x='11' y='9' width='2' height='14'/%3E%3Crect x='15' y='9' width='4' height='14'/%3E%3Crect x='21' y='9' width='2' height='14'/%3E%3Crect x='25' y='9' width='1.6' height='14'/%3E%3C/g%3E%3C/svg%3E" />
+
   <title>Captura y postprocesado</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -22,6 +33,30 @@
         al servidor para su postprocesado.
       </p>
     </header>
+
+    <!-- ================ AVISO: SIN SERVIDOR DE POSTPROCESADO ================
+         Se muestra cuando esta página está publicada en un hosting estático
+         (GitHub Pages) o cuando el endpoint no responde. Explica cómo apuntar
+         a un servidor real sin tocar el código. -->
+    <section class="host-notice" id="hostNotice" hidden aria-live="polite">
+      <h2 class="host-notice__title" id="hostNoticeTitle"></h2>
+      <p class="host-notice__text" id="hostNoticeText"></p>
+      <ol class="host-notice__steps" id="hostNoticeSteps"></ol>
+      <div class="host-notice__actions">
+        <button type="button" class="btn btn--primary" id="btnUseLocal" hidden>
+          Usar el servidor local
+        </button>
+        <button type="button" class="btn btn--ghost" id="btnCopyEndpoint">
+          Copiar URL con endpoint
+        </button>
+        <a class="btn btn--ghost" id="repoLink" target="_blank" rel="noopener" hidden>
+          Ver el repositorio
+        </a>
+        <button type="button" class="btn btn--ghost" id="btnDismissHostNotice">
+          Ocultar
+        </button>
+      </div>
+    </section>
 
     <!-- ============================ VISOR ============================ -->
     <section class="scanner" aria-label="Visor de cámara">
@@ -110,9 +145,25 @@
 
     <!-- =========================== RESULTADO =========================== -->
     <section class="result" id="result" hidden aria-live="polite">
-      <h2 class="result__title">Resultado del postprocesado</h2>
+      <h2 class="result__title">Lectura de la chapa</h2>
+
+      <!-- Texto reconocido (lo que ha "leído" el servidor) -->
+      <div class="readout" id="readout" hidden>
+        <p class="readout__label">Texto reconocido</p>
+        <pre class="readout__value" id="readoutValue"></pre>
+      </div>
+
+      <!-- Workflow de procesado: pasos con su imagen intermedia -->
+      <div class="workflow" id="workflow" hidden>
+        <h3 class="workflow__title">Workflow de procesado</h3>
+        <div class="workflow__track" id="workflowTrack" role="list"></div>
+        <p class="workflow__hint" id="workflowHint">Pulsa un paso para verlo a tamaño completo</p>
+        <div class="workflow__chars" id="workflowChars" hidden></div>
+      </div>
+
       <figure class="result__figure">
         <img id="resultImage" alt="Imagen devuelta por el servidor tras el postprocesado" />
+        <figcaption class="result__caption" id="resultCaption"></figcaption>
       </figure>
       <dl class="result__meta" id="resultMeta"></dl>
       <div class="result__actions">
@@ -124,6 +175,21 @@
     <!-- =========================== AJUSTES =========================== -->
     <details class="settings">
       <summary>Servidor de postprocesado</summary>
+
+      <label class="settings__label" for="engineSelect">Motor de lectura</label>
+      <div class="settings__row">
+        <select id="engineSelect" class="settings__select">
+          <option value="tesseract">Tesseract (OCR)</option>
+          <option value="plantillas">Plantillas CAD</option>
+        </select>
+        <span class="settings__badge" id="engineBadge" hidden></span>
+      </div>
+      <p class="settings__hint" id="engineHint">
+        <strong>Tesseract</strong> recorta el lateral derecho y hace OCR sobre la
+        imagen binarizada. <strong>Plantillas</strong> compara cada carácter contra
+        las plantillas CAD. Se aplica al enviar la siguiente captura.
+      </p>
+
       <label class="settings__label" for="endpointInput">
         Endpoint <code>POST</code> <code>multipart/form-data</code>, campo <code>image</code>
       </label>
@@ -134,9 +200,32 @@
       </div>
       <p class="settings__hint">
         Se guarda en este navegador. También puedes abrir la página con
-        <code>?endpoint=https://tu-servidor/api/process</code>.
+        <code>?endpoint=https://tu-servidor/api/process</code> y
+        <code>?engine=tesseract</code>.
+      </p>
+
+      <p class="settings__hint settings__hint--server">
+        Servidor de ejemplo: <code>cd ProtipoFotosWeb</code> &rarr;
+        <code>python server.py</code> &rarr; <code>http://localhost:3000</code>.
+        En GitHub Pages no hay backend, así que hay que apuntar el endpoint a
+        una máquina donde se ejecute.
       </p>
     </details>
+
+    <!-- =========================== PIE =========================== -->
+    <footer class="app__footer">
+      <span class="app__footerItem">
+        <span class="app__footerKey">Motor</span>
+        <span id="footerEngine">—</span>
+      </span>
+      <span class="app__footerItem">
+        <span class="app__footerKey">Backend</span>
+        <span id="footerBackend">—</span>
+      </span>
+      <a class="app__footerLink" id="footerRepo" target="_blank" rel="noopener" hidden>
+        Código en GitHub
+      </a>
+    </footer>
 
   </div>
 

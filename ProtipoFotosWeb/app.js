@@ -19,6 +19,17 @@
     /** Endpoint que recibe la imagen. Se puede sobrescribir con ?endpoint=… */
     endpoint: '/api/process',
 
+    /**
+     * Motor de postprocesado del servidor:
+     *   'tesseract'  → OCR con Tesseract (recorta el lateral derecho)
+     *   'plantillas' → matching contra plantillas CAD
+     * Se envía como ?engine=… y se puede sobrescribir con ?engine=…
+     */
+    engine: 'tesseract',
+
+    /** Recorte lateral derecho que aplica el motor tesseract (0–1). 1 = sin recorte. */
+    crop: 0.82,
+
     /** Nombre del campo del archivo en el formulario multipart. */
     fieldName: 'image',
 
@@ -187,7 +198,32 @@
   };
 
   const STORAGE_KEY = 'captura.endpoint';
+  const ENGINE_KEY = 'captura.engine';
   const AUTO_KEY = 'captura.autocapture';
+  const HOST_KEY = 'captura.hostNoticeDismissed';
+
+  /* -----------------------------------------------------------------------
+   * Despliegue: GitHub Pages y otros hosting estáticos
+   * ---------------------------------------------------------------------
+   * Esta app necesita un backend Python para postprocesar. Publicada en
+   * GitHub Pages (o abierta desde file://) no existe ese backend, así que la
+   * interfaz avisa y ofrece apuntar el endpoint a una máquina con el servidor
+   * en marcha.
+   * --------------------------------------------------------------------- */
+  const REPO = document.querySelector('meta[name="github-repo"]')?.content?.trim() || '';
+  const IS_GITHUB_PAGES = /\.github\.io$/i.test(location.hostname);
+  const IS_LOCAL_FILE = location.protocol === 'file:';
+  const IS_STATIC_HOST = IS_GITHUB_PAGES || IS_LOCAL_FILE;
+
+  /** URL del repositorio, deducida del despliegue si no hay meta tag. */
+  const REPO_URL = REPO
+    ? `https://github.com/${REPO}`
+    : (IS_GITHUB_PAGES
+      ? `https://github.com/${location.hostname.split('.')[0]}${location.pathname.split('/')[1] ? `/${location.pathname.split('/')[1]}` : ''}`
+      : '');
+
+  /** Endpoint del servidor de ejemplo (el que arranca `python server.py`). */
+  const LOCAL_ENDPOINT = 'http://localhost:3000/api/process';
 
   /** La captura solo se permite con el dispositivo apaisado (móvil/tableta). */
   const portraitQuery = window.matchMedia('(orientation: portrait) and (pointer: coarse)');
@@ -233,6 +269,33 @@
     get(key) { try { return localStorage.getItem(key); } catch { return null; } },
     set(key, value) { try { localStorage.setItem(key, value); } catch { /* modo privado */ } },
   };
+
+  /**
+   * Origen del backend que postprocesa las fotos. Puede ser el mismo que sirve
+   * la página (por defecto) o uno distinto si se configura el endpoint.
+   */
+  function backendOrigin() {
+    try { return new URL(CONFIG.endpoint, location.href).origin; }
+    catch { return location.origin; }
+  }
+
+  /**
+   * El servidor devuelve rutas del estilo «/uploads/<id>/detecciones.jpg».
+   * Cuando la web se sirve desde otro origen (GitHub Pages apuntando a
+   * localhost o a un servidor remoto) hay que resolverlas contra el backend y
+   * no contra la página, o las imágenes del workflow saldrían rotas.
+   */
+  function resolveAssetUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(url)) return url;         // http(s):// o //host
+    if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+    try {
+      const base = new URL(CONFIG.endpoint, location.href);
+      return url.startsWith('/') ? `${base.origin}${url}` : new URL(url, base).toString();
+    } catch {
+      return url;
+    }
+  }
 
   /** Error de cámara con mensaje ya listo para mostrar al usuario. */
   class CameraError extends Error {
@@ -281,11 +344,32 @@
     fileInput: $('fileInput'),
     result: $('result'),
     resultImage: $('resultImage'),
+    resultCaption: $('resultCaption'),
     resultMeta: $('resultMeta'),
+    readout: $('readout'),
+    readoutValue: $('readoutValue'),
+    workflow: $('workflow'),
+    workflowTrack: $('workflowTrack'),
+    workflowHint: $('workflowHint'),
+    workflowChars: $('workflowChars'),
     btnNew: $('btnNew'),
     btnDownload: $('btnDownload'),
     endpointInput: $('endpointInput'),
     btnSaveEndpoint: $('btnSaveEndpoint'),
+    engineSelect: $('engineSelect'),
+    engineBadge: $('engineBadge'),
+    engineHint: $('engineHint'),
+    hostNotice: $('hostNotice'),
+    hostNoticeTitle: $('hostNoticeTitle'),
+    hostNoticeText: $('hostNoticeText'),
+    hostNoticeSteps: $('hostNoticeSteps'),
+    btnUseLocal: $('btnUseLocal'),
+    btnCopyEndpoint: $('btnCopyEndpoint'),
+    repoLink: $('repoLink'),
+    btnDismissHostNotice: $('btnDismissHostNotice'),
+    footerEngine: $('footerEngine'),
+    footerBackend: $('footerBackend'),
+    footerRepo: $('footerRepo'),
     toast: $('toast'),
   };
 
@@ -313,6 +397,10 @@
       storage.set(STORAGE_KEY, fromUrl);
     } else if (saved) {
       CONFIG.endpoint = saved;
+    } else if (IS_STATIC_HOST) {
+      // Publicada en GitHub Pages (o abierta como archivo): no hay backend en
+      // este origen, así que por defecto apuntamos al servidor de ejemplo.
+      CONFIG.endpoint = LOCAL_ENDPOINT;
     }
     els.endpointInput.value = CONFIG.endpoint;
   })();
@@ -322,6 +410,147 @@
     const saved = storage.get(AUTO_KEY);
     if (saved !== null) CONFIG.analysis.autoCapture = saved === 'true';
   })();
+
+  /* -----------------------------------------------------------------------
+   * Motor de postprocesado (?engine=… > localStorage > 'tesseract')
+   * --------------------------------------------------------------------- */
+  const ENGINE_LABELS = {
+    tesseract: 'Tesseract (OCR)',
+    plantillas: 'Plantillas CAD',
+  };
+
+  (function resolveEngine() {
+    const fromUrl = new URLSearchParams(location.search).get('engine');
+    const saved = storage.get(ENGINE_KEY);
+    const valor = (fromUrl || saved || CONFIG.engine).toLowerCase();
+    CONFIG.engine = ENGINE_LABELS[valor] ? valor : CONFIG.engine;
+    if (fromUrl) storage.set(ENGINE_KEY, CONFIG.engine);
+    els.engineSelect.value = CONFIG.engine;
+  })();
+
+  /* -----------------------------------------------------------------------
+   * Estado del backend (health), aviso de despliegue estático y pie
+   * --------------------------------------------------------------------- */
+  let backendOnline = null;   // null = comprobando · true/false tras el health
+
+  /**
+   * Muestra u oculta el aviso superior.
+   *   'static'  → estamos en un hosting estático (GitHub Pages) sin backend
+   *   'offline' → hay backend configurado, pero no responde
+   *   null      → todo bien
+   */
+  function setBackendNotice(kind) {
+    if (!kind || storage.get(HOST_KEY) === 'true') {
+      els.hostNotice.hidden = true;
+      return;
+    }
+
+    const estatico = kind === 'static';
+    const mismoOrigen = backendOrigin() === location.origin;
+    let host = CONFIG.endpoint;
+    try { host = new URL(CONFIG.endpoint, location.href).host; } catch { /* endpoint raro */ }
+
+    els.hostNotice.dataset.kind = kind;
+    els.hostNoticeTitle.textContent = estatico
+      ? 'Esta página no incluye el servidor de postprocesado'
+      : 'No se pudo contactar con el servidor de postprocesado';
+    els.hostNoticeText.textContent = estatico
+      ? (IS_GITHUB_PAGES
+        ? 'Estás viendo la versión publicada en GitHub Pages: es una web estática, así que la lectura de la chapa la tiene que hacer un servidor aparte.'
+        : `Esta página se sirve desde ${location.origin}, que no ejecuta el servidor de lectura, y el backend configurado (${host}) no responde.`)
+      : `No hay respuesta en ${host}, así que la lectura no puede ejecutarse.`;
+
+    const pasos = estatico
+      ? [
+          'Arranca el servidor en tu equipo: abre una consola en ProtipoFotosWeb y ejecuta python server.py (queda escuchando en http://localhost:3000).',
+          'Pulsa «Usar el servidor local» y vuelve a capturar.',
+          'Si el backend está en otra máquina, escribe su URL en el apartado Endpoint y pulsa Guardar.',
+        ]
+      : [
+          'Comprueba que el servidor está arrancado: python server.py dentro de ProtipoFotosWeb.',
+          'Revisa la URL del apartado Endpoint (por defecto /api/process del mismo origen).',
+          'Si esta página es HTTPS y el backend HTTP, el navegador puede bloquear la petición: usa el servidor local o sirve el backend con HTTPS.',
+        ];
+
+    els.hostNoticeSteps.replaceChildren(...pasos.map((texto) => {
+      const li = document.createElement('li');
+      li.textContent = texto;
+      return li;
+    }));
+
+    els.btnUseLocal.hidden = !estatico;
+    if (REPO_URL) {
+      els.repoLink.href = REPO_URL;
+      els.repoLink.hidden = false;
+    } else {
+      els.repoLink.hidden = true;
+    }
+    els.hostNotice.hidden = false;
+  }
+
+  /** Pie de página: motor activo, estado del backend y enlace al repositorio. */
+  function syncFooter() {
+    els.footerEngine.textContent = ENGINE_LABELS[CONFIG.engine] || CONFIG.engine;
+
+    if (backendOnline === true) {
+      let host;
+      try { host = new URL(CONFIG.endpoint, location.href).host; }
+      catch { host = CONFIG.endpoint; }
+      els.footerBackend.textContent = `conectado · ${host}`;
+    } else if (backendOnline === false) {
+      els.footerBackend.textContent = 'sin conexión';
+    } else {
+      els.footerBackend.textContent = 'comprobando…';
+    }
+
+    if (REPO_URL) {
+      els.footerRepo.href = REPO_URL;
+      els.footerRepo.hidden = false;
+    } else {
+      els.footerRepo.hidden = true;
+    }
+  }
+
+  /**
+   * Consulta /api/health del backend configurado: actualiza el aviso de
+   * despliegue estático, la disponibilidad de Tesseract y el pie.
+   */
+  async function checkBackend() {
+    const anterior = backendOnline;
+
+    try {
+      const url = new URL(CONFIG.endpoint, location.href);
+      url.pathname = url.pathname.replace(/\/process\/?$/, '/health');
+      const response = await fetch(url.toString(), { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+
+      backendOnline = true;
+      setBackendNotice(null);
+
+      const info = data?.engines?.tesseract;
+      const sinTesseract = Boolean(info && info.available === false);
+      if (sinTesseract) {
+        els.engineBadge.hidden = false;
+        els.engineBadge.textContent = 'Tesseract no disponible en el servidor';
+        els.engineBadge.title = info.error || '';
+      } else {
+        els.engineBadge.hidden = true;
+      }
+
+      if (anterior === false) showToast('Servidor conectado.', 'ok', 2500);
+    } catch {
+      // Si el endpoint no es del mismo origen que la página, lo normal es que
+      // esta se esté sirviendo desde un hosting estático (GitHub Pages, etc.).
+      backendOnline = false;
+      els.engineBadge.hidden = true;
+      const mismoOrigen = backendOrigin() === location.origin;
+      setBackendNotice(IS_STATIC_HOST || !mismoOrigen ? 'static' : 'offline');
+      if (anterior === true) showToast('Se ha perdido la conexión con el servidor.', 'error', 4000);
+    } finally {
+      syncFooter();
+    }
+  }
 
   /* -----------------------------------------------------------------------
    * Interfaz: estados, avisos y toasts
@@ -1016,9 +1245,18 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CONFIG.timeoutMs);
 
+    // El motor y el recorte viajan como parámetros de la query.
+    let endpoint = CONFIG.endpoint;
+    try {
+      const url = new URL(CONFIG.endpoint, location.href);
+      url.searchParams.set('engine', CONFIG.engine);
+      url.searchParams.set('crop', String(CONFIG.crop));
+      endpoint = url.toString();
+    } catch { /* endpoint relativo raro: se envía tal cual */ }
+
     let response;
     try {
-      response = await fetch(CONFIG.endpoint, {
+      response = await fetch(endpoint, {
         method: 'POST',
         body: form,
         signal: controller.signal,
@@ -1027,7 +1265,10 @@
       if (error?.name === 'AbortError') {
         throw new Error(`El servidor tardó más de ${Math.round(CONFIG.timeoutMs / 1000)} s en responder.`);
       }
-      throw new Error(`No se pudo contactar con el servidor (${CONFIG.endpoint}). ¿Está en marcha?`);
+      const mismoOrigen = backendOrigin() === location.origin;
+      throw new Error(IS_STATIC_HOST || !mismoOrigen
+        ? `Esta página está publicada sin servidor de postprocesado, y ${CONFIG.endpoint} no responde. Arranca el backend (python server.py) o cambia el endpoint.`
+        : `No se pudo contactar con el servidor (${CONFIG.endpoint}). ¿Está en marcha?`);
     } finally {
       clearTimeout(timer);
     }
@@ -1044,7 +1285,7 @@
 
     if (type.includes('application/json')) {
       const data = await response.json();
-      const url = data.imageUrl || data.resultUrl || data.url || null;
+      const url = resolveAssetUrl(data.imageUrl || data.resultUrl || data.url || null);
       return { data, url, kind: 'json' };
     }
 
@@ -1082,6 +1323,7 @@
     busy = true;
     els.btnCapture.disabled = true;
     els.result.hidden = true;
+    clearWorkflow();
 
     try {
       // 1. Flash visual + congelado del fotograma
@@ -1131,6 +1373,7 @@
     if (!file) return;
     els.btnCapture.disabled = true;
     els.result.hidden = true;
+    clearWorkflow();
     busy = true;
 
     try {
@@ -1174,6 +1417,149 @@
     }
   }
 
+  /* -----------------------------------------------------------------------
+   * Workflow de procesado (pasos del pipeline + caracteres reconocidos)
+   * --------------------------------------------------------------------- */
+  function clearWorkflow() {
+    els.workflow.hidden = true;
+    els.workflowTrack.replaceChildren();
+    els.workflowChars.replaceChildren();
+    els.workflowChars.hidden = true;
+    els.workflowHint.hidden = true;
+    els.readout.hidden = true;
+    els.resultCaption.textContent = '';
+  }
+
+  /** Muestra el paso seleccionado en la imagen grande y lo marca como activo. */
+  function selectWorkflowStep(step, button) {
+    if (!step?.image) return;
+    for (const child of els.workflowTrack.children) {
+      child.classList.toggle('is-active', child === button);
+    }
+    els.resultImage.src = step.image;
+    els.resultImage.hidden = false;
+    els.btnDownload.href = step.image;
+    els.btnDownload.hidden = false;
+    els.btnDownload.setAttribute('download', `paso-${step.id || 'paso'}-${Date.now()}.jpg`);
+    els.resultCaption.textContent = `${step.index}. ${step.title}`;
+  }
+
+  function renderWorkflow(data) {
+    const wf = data?.workflow;
+    els.workflowTrack.replaceChildren();
+    els.workflowChars.replaceChildren();
+
+    // --- Texto reconocido -------------------------------------------------
+    const texto = (data?.text || '').trim();
+    els.readoutValue.textContent = texto || 'Sin texto reconocido';
+    els.readout.dataset.empty = String(!texto);
+    els.readout.hidden = false;
+
+    // Las imágenes del workflow vienen como rutas del backend (/uploads/…):
+    // se resuelven contra su origen para que funcionen también en GitHub Pages.
+    const steps = Array.isArray(wf?.steps)
+      ? wf.steps.filter((s) => s.image).map((s) => ({ ...s, image: resolveAssetUrl(s.image) }))
+      : [];
+    if (!steps.length) {
+      els.workflow.hidden = true;
+      els.workflowChars.hidden = true;
+      return;
+    }
+
+    els.workflow.hidden = false;
+    els.workflowHint.hidden = steps.length < 2;
+
+    // Por defecto se muestra el último paso (las detecciones anotadas).
+    const activeIndex = steps.length - 1;
+
+    steps.forEach((step, i) => {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'workflow__step';
+      card.setAttribute('role', 'listitem');
+      if (i === activeIndex) card.classList.add('is-active');
+
+      const head = document.createElement('span');
+      head.className = 'workflow__stepHead';
+
+      const num = document.createElement('span');
+      num.className = 'workflow__num';
+      num.textContent = String(step.index ?? i + 1);
+
+      const title = document.createElement('span');
+      title.className = 'workflow__stepTitle';
+      title.textContent = step.title || `Paso ${i + 1}`;
+
+      head.append(num, title);
+
+      const thumb = document.createElement('span');
+      thumb.className = 'workflow__thumb';
+      const img = document.createElement('img');
+      img.src = step.image;
+      img.alt = step.title || '';
+      img.loading = 'lazy';
+      thumb.append(img);
+
+      const desc = document.createElement('span');
+      desc.className = 'workflow__stepDesc';
+      desc.textContent = step.description || '';
+
+      card.append(head, thumb, desc);
+
+      if (Array.isArray(step.stats) && step.stats.length) {
+        const stats = document.createElement('span');
+        stats.className = 'workflow__stats';
+        for (const [key, value] of step.stats) {
+          const item = document.createElement('span');
+          item.className = 'workflow__stat';
+          const k = document.createElement('small');
+          k.textContent = key;
+          const v = document.createElement('b');
+          v.textContent = String(value);
+          item.append(k, v);
+          stats.append(item);
+        }
+        card.append(stats);
+      }
+
+      card.addEventListener('click', () => selectWorkflowStep(step, card));
+      els.workflowTrack.append(card);
+    });
+
+    const activeButton = els.workflowTrack.children[activeIndex];
+    selectWorkflowStep(steps[activeIndex], activeButton);
+
+    // --- Chips: recorte de cada carácter/palabra + confianza ---------------
+    const chars = Array.isArray(wf?.chars) ? wf.chars : [];
+    if (chars.length) {
+      els.workflowChars.hidden = false;
+      chars.forEach((c) => {
+        const esPalabra = c.kind === 'word';
+        const chip = document.createElement('span');
+        chip.className = `workflow__chip${c.accepted ? '' : ' is-rejected'}`;
+        chip.title = `línea ${Number(c.line) + 1} · confianza ${Number(c.score).toFixed(2)}`;
+        if (esPalabra) chip.classList.add('workflow__chip--word');
+        if (c.image) {
+          const img = document.createElement('img');
+          img.src = resolveAssetUrl(c.image);
+          img.alt = '';
+          img.loading = 'lazy';
+          chip.append(img);
+        }
+        const label = document.createElement('b');
+        label.textContent = c.accepted ? c.char : (esPalabra ? c.char : '?');
+        const score = document.createElement('small');
+        score.textContent = c.kind === 'word'
+          ? `${Math.round(Number(c.score) * 100)} %`
+          : Number(c.score).toFixed(2);
+        chip.append(label, score);
+        els.workflowChars.append(chip);
+      });
+    } else {
+      els.workflowChars.hidden = true;
+    }
+  }
+
   async function showResult(result, local) {
     if (resultObjectUrl) {
       URL.revokeObjectURL(resultObjectUrl);
@@ -1203,19 +1589,29 @@
     }
 
     const serverMeta = result.data?.meta || {};
+    const workflow = result.data?.workflow;
     const rows = [
       ['Tamaño enviado', formatBytes(local.bytes)],
       ['Resolución enviada', local.width ? `${local.width} × ${local.height} px` : '—'],
       ['Tiempo de ida y vuelta', `${local.elapsed} ms`],
       ['Respuesta', result.kind],
+      ['Motor', result.data?.engine ? (ENGINE_LABELS[result.data.engine] || result.data.engine) : undefined],
+      ['Config OCR', workflow?.config],
+      ['Recorte lateral', workflow?.crop ? `${Math.round(workflow.crop * 100)} %` : undefined],
       ['ID en el servidor', result.data?.id],
       ['Imagen procesada', result.data?.imageUrl || result.data?.resultUrl || null],
       ['Transformaciones', Array.isArray(serverMeta.transforms) ? serverMeta.transforms.join(', ') : undefined],
+      ['Avisos', Array.isArray(serverMeta.warnings) && serverMeta.warnings.length
+        ? serverMeta.warnings.join(' ') : undefined],
       ['Mensaje', result.data?.message || serverMeta.message],
       ['Debug', CONFIG.debug && result.data ? JSON.stringify(result.data).slice(0, 220) : undefined],
     ];
 
     renderMeta(rows);
+
+    // Workflow visual (pasos del pipeline + caracteres), si el servidor lo envía
+    renderWorkflow(result.data);
+
     els.result.hidden = false;
     els.result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -1286,6 +1682,17 @@
 
   syncShutter();
   syncAutoButton();
+  syncFooter();
+
+  els.engineSelect.addEventListener('change', () => {
+    const valor = els.engineSelect.value;
+    if (!ENGINE_LABELS[valor]) return;
+    CONFIG.engine = valor;
+    storage.set(ENGINE_KEY, valor);
+    syncFooter();
+    showToast(`Motor de lectura: ${ENGINE_LABELS[valor]}`, 'ok', 2500);
+    checkBackend();
+  });
 
   els.btnSaveEndpoint.addEventListener('click', () => {
     const value = els.endpointInput.value.trim();
@@ -1297,6 +1704,33 @@
     storage.set(STORAGE_KEY, value);
     els.endpointInput.value = value;
     showToast(`Endpoint guardado: ${value}`, 'ok');
+    checkBackend();
+  });
+
+  /* --- Aviso de despliegue estático: acciones ------------------------- */
+  els.btnUseLocal.addEventListener('click', () => {
+    CONFIG.endpoint = LOCAL_ENDPOINT;
+    storage.set(STORAGE_KEY, LOCAL_ENDPOINT);
+    els.endpointInput.value = LOCAL_ENDPOINT;
+    showToast('Endpoint apuntando al servidor local.', 'ok', 3000);
+    checkBackend();
+  });
+
+  els.btnCopyEndpoint.addEventListener('click', async () => {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set('endpoint', CONFIG.endpoint);
+      url.searchParams.set('engine', CONFIG.engine);
+      await navigator.clipboard.writeText(url.toString());
+      showToast('Enlace con el endpoint copiado al portapapeles.', 'ok', 3500);
+    } catch {
+      showToast(`No se pudo copiar. Abre esta página con ?endpoint=${CONFIG.endpoint}`, 'error', 6000);
+    }
+  });
+
+  els.btnDismissHostNotice.addEventListener('click', () => {
+    storage.set(HOST_KEY, 'true');
+    els.hostNotice.hidden = true;
   });
 
   // API pública mínima para integrar con el resto de la página.
@@ -1309,6 +1743,16 @@
     isReady: () => Boolean(stream) && !busy,
     canCapture: () => Boolean(stream) && !busy && !isRotationBlocked() &&
       (!analyzer.blocked() || CONFIG.analysis.allowOverride),
+
+    /** Información del despliegue (útil para integrar la página). */
+    deployment: {
+      staticHost: IS_STATIC_HOST,
+      githubPages: IS_GITHUB_PAGES,
+      repoUrl: REPO_URL || null,
+      backendOnline: () => backendOnline,
+      checkBackend,
+      resolveAssetUrl,
+    },
 
     /** Lectura y control del análisis en tiempo real (para integraciones). */
     analysis: {
@@ -1333,5 +1777,6 @@
   /* -----------------------------------------------------------------------
    * Arranque
    * --------------------------------------------------------------------- */
+  checkBackend();
   startCamera().catch(handleCameraFailure);
 })();

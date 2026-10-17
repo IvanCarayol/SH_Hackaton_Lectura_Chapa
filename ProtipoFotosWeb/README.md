@@ -18,9 +18,14 @@ bloquea el disparador.
 ├── styles.css      Estilos: máscara oscura, esquinas, línea de barrido, modo apaisado
 ├── app.js          Cámara, análisis del encuadre, recorte del fotograma, envío y pintado
 ├── server.js       Mock del servidor — Node.js, sin dependencias
-├── server.py       Mock del servidor — Python 3, solo biblioteca estándar
-└── uploads/        Donde el mock guarda las imágenes "procesadas"
+├── server.py       Servidor REAL de lectura — Python 3 + OpenCV (+ Tesseract OCR)
+├── templates/      Plantillas CAD de cada carácter (templates/templates/*.jpg)
+└── uploads/        Resultados: una carpeta por lectura con los pasos del proceso
 ```
+
+> `server.js` sigue siendo el mock (copia la imagen). `server.py` hace el
+> reconocimiento real del texto troquelado (Tesseract u OCR por plantillas) y
+> devuelve el workflow paso a paso.
 
 ---
 
@@ -29,12 +34,25 @@ bloquea el disparador.
 Cualquiera de los dos mocks sirve el frontend **y** el endpoint, así que no hay
 problemas de CORS ni de rutas.
 
-**Python 3** (no necesita instalar nada):
+**Python 3** (servidor real de lectura, necesita OpenCV, NumPy, pytesseract y Tesseract):
 
 ```bash
+pip install -r ../requirements.txt   # opencv-python + pytesseract + Pillow
 python server.py
 # → http://localhost:3000
 ```
+
+Para el motor **tesseract** hace falta además el binario de Tesseract en el sistema:
+
+```bash
+winget install UB-Mannheim.TesseractOCR
+# o descarga el instalador de https://github.com/UB-Mannheim/tesseract
+```
+
+El servidor lo busca en `C:\Program Files\Tesseract-OCR\tesseract.exe`,
+`C:\Program Files (x86)\…`, `%LOCALAPPDATA%\Programs\Tesseract-OCR\…` y en el
+`PATH`. Si está en otro sitio, define `TESSERACT_CMD` con la ruta completa.
+`GET /api/health` indica qué motores están disponibles.
 
 **Node.js** (tampoco necesita `npm install`):
 
@@ -56,11 +74,34 @@ configuración del repositorio, habilita **Settings → Pages → Build and depl
 Source: GitHub Actions**. La URL publicada aparece en el entorno `github-pages` del
 workflow.
 
-GitHub Pages sirve archivos estáticos, no ejecuta `server.py` ni `server.js`. Para
-procesar capturas en la web publicada, despliega el backend en un servicio externo
-con HTTPS y configura su endpoint en **Servidor de postprocesado** o con el parámetro
-`?endpoint=https://tu-servidor/api/process`. La cámara funciona en Pages porque la
-página se sirve por HTTPS.
+GitHub Pages sirve archivos estáticos, no ejecuta `server.py` ni `server.js`.
+La página **lo sabe y lo explica**: al abrirla comprueba `GET /api/health` del
+endpoint configurado y, si no hay backend en su origen, muestra un aviso con las
+instrucciones para ponerlo en marcha (arrancar `python server.py`, botón
+**Usar el servidor local**, enlace al repositorio, etc.). En la esquina inferior
+se ve el motor activo y si el backend está **conectado** o **sin conexión**.
+
+Detalle de ese modo (es lo que hace que la publicación funcione de verdad):
+
+- **Endpoint por defecto**: sin `?endpoint=` ni valor guardado, en un hosting
+  estático apunta a `http://localhost:3000/api/process`. Cámbialo en
+  **Servidor de postprocesado** o con `?endpoint=https://tu-servidor/api/process`.
+- **CORS y Private Network Access**: `server.py` responde con
+  `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Private-Network: true`
+  y las cabeceras del `OPTIONS`, para que una página HTTPS (GitHub Pages) pueda
+  llamar a un backend local HTTP sin que el navegador lo bloquee.
+- **Rutas absolutas del backend**: el servidor devuelve `image`, `steps[].image`
+  y `chars[].image` como `/uploads/<id>/…`. La web los reescribe contra el origen
+  del endpoint (`resolveAssetUrl`), así el workflow se ve aunque la página y el
+  servidor estén en dominios distintos.
+- **Misma página, dos orígenes**: puedes servir `index.html` desde cualquier
+  sitio estático (otro puerto, Netlify, S3…) y que el postprocesado lo haga
+  `server.py` corriendo en tu máquina; el aviso aparece cuando ese backend deja
+  de responder.
+
+La cámara funciona en Pages porque la página se sirve por HTTPS (recuerda que,
+desde una página pública, el navegador exige permisos y puede limitar el acceso
+a `localhost`; si falla, arranca el backend con `ngrok http 3000` y usa su URL).
 
 ### Probar desde el móvil
 
@@ -81,6 +122,8 @@ En `app.js`, arriba del todo:
 ```js
 const CONFIG = {
   endpoint: '/api/process',   // ← tu URL
+  engine: 'tesseract',        // 'tesseract' (OCR) | 'plantillas' (matching CAD)
+  crop: 0.82,                 // recorte lateral derecho del motor tesseract (0–1)
   fieldName: 'image',
   captureMode: 'frame',       // 'frame' (recorte al marco) | 'full' (fotograma completo)
   jpegQuality: 0.92,
@@ -91,11 +134,14 @@ const CONFIG = {
 };
 ```
 
+`engine` y `crop` viajan como parámetros de la query (`?engine=…&crop=…`), así que
+puedes apuntar a cualquier backend que los entienda. También se pueden fijar por URL:
+
 También puedes cambiarlo sin tocar el código, desde la propia pantalla
 (apartado *Servidor de postprocesado*) o con la URL:
 
 ```
-http://localhost:3000/?endpoint=https://mi-api.com/v1/postprocesar
+http://localhost:3000/?endpoint=https://mi-api.com/v1/postprocesar&engine=plantillas
 ```
 
 ### Contrato de la petición
@@ -140,12 +186,85 @@ notifica junto al cuerpo (recortado) que devuelva el servidor.
 
 ### Sustituir el postprocesado de mentira
 
-El mock solo **copia** el archivo recibido. Cambia estas funciones:
+`server.js` solo **copia** el archivo recibido (cambia su `processImage(input, id)`).
 
-- `server.js` → `processImage(input, id)`
-- `server.py` → `process_image(datos, identificador)`
+`server.py` ya trae **dos motores reales de lectura**, elegibles con `?engine=…`
+(o desde la interfaz, apartado *Servidor de postprocesado → Motor de lectura*):
 
-Ambas incluyen un ejemplo comentado (con `sharp` y con Pillow respectivamente).
+#### Motor `tesseract` (por defecto) — puerto de `procesamientoTesseract.py`
+
+1. **Recorte lateral** — descarta el 18 % derecho de la imagen (`?crop=0.9` para
+   ajustarlo, `?crop=1` para no recortar) y quita el rectángulo vertical que
+   confunde al OCR.
+2. **Escala de grises + desenfoque** — `GaussianBlur 5×5`.
+3. **Binarización Otsu** — y se invierte automáticamente si el fondo queda oscuro,
+   porque Tesseract espera **texto negro sobre fondo blanco**.
+4. **Limpieza** — apertura 3×3 para las motas de ruido.
+5. **Cierre 5×5** — unifica los cortes del stencil sin deformar la letra.
+6. **OCR** — `--psm 6` con whitelist `0123456789A-Z*`; además de `image_to_string`
+   se usa `image_to_data` para tener la **confianza de cada palabra** (umbral 60 %)
+   y dibujar su caja.
+
+#### Motor `plantillas` — puerto de `procesadoImagen.py`
+
+1. **Escala de grises + desenfoque** — `GaussianBlur 5×5` para calmar el ruido del metal.
+2. **Binarización Otsu invertida** — deja las letras en blanco sobre fondo negro.
+3. **Cierre morfológico 7×7** — sella los huecos del stencil y aísla cada carácter.
+4. **Filtrado de contornos** — descarta cajas por tamaño y proporción (ruido, brillos).
+5. **Agrupación en líneas** — reagrupa los caracteres por altura y los ordena por X.
+6. **Matching** — cada recorte normalizado (64×96) se compara con las plantillas CAD
+   (`templates/templates/*.jpg`) mediante `matchTemplate(TM_CCOEFF_NORMED)`; por
+   debajo de `UMBRAL_MATCH` (0.30) el carácter sale como `?`.
+
+En ambos casos, cada paso se guarda como imagen en `uploads/<id>/` y se devuelve en
+`workflow.steps`, así que el frontend **pinta el workflow** (carrusel de pasos +
+chips con el recorte y la confianza de cada carácter o palabra) además de la imagen
+final anotada.
+
+> Si se pide `tesseract` de forma explícita y no está instalado, el servidor
+> responde 500 con el motivo. Si **no** se indica motor, cae a `plantillas` y lo
+> avisa en `meta.warnings`.
+
+### Respuesta del servidor de lectura
+
+`server.py` responde (además de `imageUrl`/`resultUrl` y `meta`) con:
+
+```json
+{
+  "ok": true,
+  "id": "1792246024962-5fbf5846",
+  "engine": "tesseract",
+  "imageUrl": "/uploads/<id>/ocr.jpg",
+  "text": "AB-1234\nCD5678",
+  "lines": ["AB-1234", "CD5678"],
+  "workflow": {
+    "engine": "tesseract",
+    "config": "--psm 6 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ*",
+    "threshold": 0.6,
+    "crop": 0.82,
+    "steps": [
+      {
+        "id": "original", "index": 1,
+        "title": "Imagen capturada",
+        "description": "Fotograma recibido del visor…",
+        "image": "/uploads/<id>/original.jpg",
+        "stats": [["Resolución", "995 × 249 px"], ["Tamaño", "40 KB"]]
+      }
+      // …recorte, grises, binaria, limpia, procesada, ocr (o cajas/contornos/… con plantillas)
+    ],
+    "chars": [
+      { "char": "AB", "score": 0.87, "accepted": true, "line": 0, "index": 0,
+        "kind": "word", "box": { "x": 12, "y": 40, "w": 34, "h": 62 },
+        "image": "/uploads/<id>/word-0.png" }
+    ]
+  }
+}
+```
+
+El frontend pinta `text` como «texto reconocido», el carrusel de `steps` (al pulsar un
+paso se agranda su imagen) y los `chars` como chips (`kind: "char"` con el recorte de
+64×96, o `kind: "word"` con el recorte de la palabra y su confianza en %).
+Si un backend distinto no devuelve `workflow`, esa parte simplemente no se muestra.
 
 ---
 
@@ -309,6 +428,15 @@ window.captura.isReady();          // ¿cámara lista y sin trabajo en curso?
 window.captura.canCapture();       // ¿se puede disparar ahora? (incluye el apaisado)
 window.captura.stopCamera();       // libera la cámara
 window.captura.config;             // el objeto CONFIG, modificable en caliente
+
+// Despliegue (útil si la página se publica en un hosting estático):
+window.captura.deployment.staticHost;      // ¿sin backend en el propio origen?
+window.captura.deployment.githubPages;     // ¿estamos en *.github.io?
+window.captura.deployment.repoUrl;         // 'https://github.com/<owner>/<repo>' o null
+window.captura.deployment.backendOnline(); // true | false | null (comprobando)
+window.captura.deployment.checkBackend();  // vuelve a consultar /api/health
+window.captura.deployment.resolveAssetUrl('/uploads/x/y.jpg');
+                                           // '/uploads/…' → URL del backend
 
 window.captura.on((evento, datos) => {
   // 'camera:ready'  → { label, settings }
